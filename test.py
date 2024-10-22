@@ -21,7 +21,8 @@ import torch
 import math
 import torch.nn as nn
 
-
+parser = argparse.ArgumentParser(description='VIRALpre is a deep-learning based python library tool for identifying viruses from'
+                                             'metagenomic dataset.')
 parser.add_argument('--input', type=str, help='name of the input file (fasta format)')
 parser.add_argument('--output', type=str, help='output directory', default='result')
 parser.add_argument('--len', type=int, help='predict only for sequences >= len bp (default: 500)', default=500)
@@ -30,11 +31,8 @@ inputs = parser.parse_args()
 
 input_pth = inputs.input
 output_path = inputs.output
-batch_size = inputs.batch_size
 len_threshold = int(inputs.len)
 score_threshold = float(inputs.threshold)
-cpu_threads = int(inputs.threads)
-model_pth = 'model'
 filename = input_pth.rsplit('/')[-1].split('.')[0]
 
 if score_threshold < 0.5:
@@ -56,7 +54,7 @@ def special_match(strg, search=re.compile(r'[^ACGT]').search):
 def preprocee_data(input_pth, output_path, len_threshold):
     frag_len = 1024
     filename = input_pth.rsplit('/')[-1].split('.')[0]
-    f = open(f"{output_path}/{filename}_temp.csv", "w")
+    f = open(f"{output_path}/{filename}_split.csv", "w")
     f.write(f'sequences,ids\n')
     copy_nums = []
     for record in SeqIO.parse(input_pth, "fasta"):
@@ -67,7 +65,7 @@ def preprocee_data(input_pth, output_path, len_threshold):
             if len(sequence) < len_threshold:
                 continue
             else:   
-               for i in range(0, len(sequence)-frag_len+1, 1024):
+                for i in range(0, len(sequence)-frag_len+1, 1024):
                     if len(sequence) - last_pos < 2048:
                         f.write(f'{sequence[last_pos:]},{f"{record.id}_{last_pos - 0}_{len(record.seq)}"}\n')
                         copy_num += 1
@@ -86,8 +84,7 @@ def preprocee_data(input_pth, output_path, len_threshold):
 class embedding_Dataset(Dataset):
     def __init__(self, path):
         self.sequences = pd.read_csv(path)['sequences']
-        print('the amount of contigs:', len(self.sequences))
-        self.sequences = [sequence for sequence in self.sequences]#[:1000000]
+        self.sequences = [sequence for sequence in self.sequences]
         self.sequences = preprocess_function(self.sequences)
         self.input_ids = self.sequences['input_ids']
 
@@ -103,7 +100,7 @@ class myDataset(Dataset):
         self.emb = torch.load(emb_path) 
         print('test contigs:', len(self.emb))
         self.kmer = np.load(kmer_path)
-        self.labels = [1 for i in range(40000000)] 
+        self.labels = [1 for i in range(4000000)] 
         print(len(self.emb))
     
     def __len__(self):
@@ -152,8 +149,6 @@ def test(model, device, test_loader, epoch, loss_fn):
 
     print('labels', label[:100])
     print('preds', result[:100])
-    #plot_roc(label, outputs)
-    #print_performance(epoch, label, result)
     return test_loss, scores
 
 def preprocess_function(sample):
@@ -178,7 +173,7 @@ def inference(model, input_ids):
 def restore_embedding(path, embedding_path):
     device = 'cuda'
     amount = 0
-    batch_size = 32
+    batch_size = 4
     ds = embedding_Dataset(path)
     print('the numer of split contigs:', len(ds))
     embedding_list = []
@@ -201,10 +196,9 @@ def restore_kmer(path, kmer_path):
     print(len(sequences))
     obj = kmer_featurization(5)
     kmer_features = obj.obtain_kmer_feature_for_a_list_of_sequences(sequences, write_number_of_occurrences=False)
-
     np.save(kmer_path, np.array(kmer_features, dtype=np.float32))
 
-path = output_path + '/' + filename + '_temp.csv'
+path = output_path + '/' + filename + '_split.csv'
 embedding_path = output_path + '/embedding.pt'
 if not os.path.exists(path):
     print('---splitting starts---')
@@ -217,7 +211,7 @@ if not os.path.exists(embedding_path):
     restore_embedding(path, embedding_path)
 else:
     print('embedding exists')
-
+#restore_embedding(path, embedding_path + '_500000+')
 og_path = output_path+'/orginal.csv'
 kmer_path = output_path + '/kmer.npy'
 if not os.path.exists(kmer_path):
@@ -231,7 +225,7 @@ else:
 device = 'cpu'
 batch_size = 64
 epoch = 1
-model = torch.load('weight.pth')
+model = torch.load('my_model.pth')
 model.to(device)
 ds = myDataset(embedding_path, kmer_path)
 data_loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
